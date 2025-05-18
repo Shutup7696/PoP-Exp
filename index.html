@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>PoP Priming Experiment</title>
+  <style>
+    body { text-align:center; font-family:sans-serif; margin-top:30px; }
+    canvas { background:#ccc; display:block; margin:10px auto; }
+    button { padding:10px 20px; font-size:18px; margin:10px; }
+  </style>
+</head>
+<body>
+  <h2>PoP Priming Experiment</h2>
+  <canvas id="annulus" width="200" height="200"></canvas>
+  <canvas id="canvas" width="600" height="300"></canvas>
+
+  <div id="startDiv">
+    <button id="startBtn">Start Experiment</button>
+  </div>
+  <div id="respDiv" style="display:none;">
+    <button class="respBtn" data-choice="up">Notch Up</button>
+    <button class="respBtn" data-choice="down">Notch Down</button>
+  </div>
+  <div id="memRespDiv" style="display:none;">
+    <button class="memBtn" data-choice="same">Same</button>
+    <button class="memBtn" data-choice="diff">Different</button>
+  </div>
+  <p id="status"></p>
+
+<script>
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzdJgvZCvWUtUOfMGIZowRHcXmPcCEiUTNpABvwivDl_lfZG2ZPO2hW5OBgUJxDaB8dug/exec';
+const BLOCK_COLORS = [['red','green'], ['blue','yellow']];
+const TOTAL_TRIALS = 40;
+let subj = 'subj_' + Date.now();
+let trialIdx = 0, startTime = 0;
+let memoryTrialBuffer = null;
+let trialLog = [];
+
+const ann = document.getElementById('annulus'), aCtx = ann.getContext('2d');
+const canvas = document.getElementById('canvas'), ctx = canvas.getContext('2d');
+
+function drawAnnulus(color) {
+  aCtx.clearRect(0,0,200,200);
+  aCtx.lineWidth = 20;
+  aCtx.strokeStyle = color;
+  aCtx.beginPath();
+  aCtx.arc(100,100,80,0,2*Math.PI);
+  aCtx.stroke();
+}
+
+function drawItem(x, y, size, color, notch) {
+  const h=size, w=size*0.7;
+  ctx.fillStyle=color;
+  ctx.beginPath();
+  ctx.moveTo(x,y-h);
+  ctx.lineTo(x+w,y);
+  ctx.lineTo(x,y+h);
+  ctx.lineTo(x-w,y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle='#ccc';
+  ctx.beginPath();
+  if(notch==='up') {
+    ctx.moveTo(x,y-h);
+    ctx.lineTo(x-w*0.3,y-h+h*0.4);
+    ctx.lineTo(x+w*0.3,y-h+h*0.4);
+  } else {
+    ctx.moveTo(x,y+h);
+    ctx.lineTo(x-w*0.3,y+h-h*0.4);
+    ctx.lineTo(x+w*0.3,y+h-h*0.4);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+function generateTrial() {
+  const isMemory = Math.random() < 0.25;
+  const block = Math.floor(trialIdx / 20) % 2;
+  const [tCol, dCol] = BLOCK_COLORS[block];
+  return { trial_number: trialIdx + 1, block, tCol, dCol, isMemory };
+}
+
+function runTrial() {
+  const tr = generateTrial();
+  ctx.clearRect(0,0,600,300);
+  const annColor = tr.isMemory ? 'white' : 'black';
+  drawAnnulus(annColor);
+
+  if (tr.isMemory) {
+    if (!memoryTrialBuffer) {
+      // Encoding trial
+      const colors = Array(3).fill().map(() => Math.random() < 0.5 ? tr.tCol : tr.dCol);
+      const positions = [150,300,450];
+      positions.forEach((x, i) => drawItem(x, 150, 50, colors[i], 'up'));
+      memoryTrialBuffer = { colors: [...colors] };
+      setTimeout(() => {
+        trialLog.push({ ...tr, task: 'memory_encode' });
+        nextTrial();
+      }, 1000);
+    } else {
+      // Test trial
+      const changed = Math.random() < 0.5;
+      let colors = [...memoryTrialBuffer.colors];
+      if (changed) colors[Math.floor(Math.random()*3)] = tr.tCol === colors[0] ? tr.dCol : tr.tCol;
+      const positions = [150,300,450];
+      positions.forEach((x, i) => drawItem(x, 150, 50, colors[i], 'up'));
+      startTime = Date.now();
+      document.getElementById('memRespDiv').style.display = 'block';
+      memoryTrialBuffer = null; // reset for next encode
+      memoryTrialBufferCorrectAnswer = changed ? 'diff' : 'same';
+      currentTrial = { ...tr, task: 'memory_test', correct: memoryTrialBufferCorrectAnswer };
+    }
+  } else {
+    const colors = [tr.tCol, tr.dCol, tr.dCol].sort(() => Math.random() - 0.5);
+    const notch = colors.map(c => Math.random() < 0.5 ? 'up' : 'down');
+    const correct = notch[colors.indexOf(tr.tCol)];
+    [150,300,450].forEach((x,i) => drawItem(x,150,50,colors[i],notch[i]));
+    startTime = Date.now();
+    document.getElementById('respDiv').style.display = 'block';
+    currentTrial = { ...tr, task: 'search', colors, notch, correct };
+  }
+}
+
+function handleSearchResp(ans) {
+  document.getElementById('respDiv').style.display = 'none';
+  const rt = Date.now() - startTime;
+  const correct = (ans === currentTrial.correct);
+  saveTrial({ ...currentTrial, response: ans, rt_ms: rt, is_correct: correct });
+  nextTrial();
+}
+
+function handleMemoryResp(ans) {
+  document.getElementById('memRespDiv').style.display = 'none';
+  const rt = Date.now() - startTime;
+  const correct = (ans === currentTrial.correct);
+  saveTrial({ ...currentTrial, response: ans, rt_ms: rt, is_correct: correct });
+  nextTrial();
+}
+
+function saveTrial(data) {
+  fetch(WEB_APP_URL, {
+    method: 'POST',
+    body: JSON.stringify({ subject_id: subj, ...data })
+  }).then(r => r.json()).then(console.log).catch(console.error);
+}
+
+function nextTrial() {
+  trialIdx++;
+  if (trialIdx < TOTAL_TRIALS) runTrial();
+  else document.getElementById('status').innerText = 'Experiment complete';
+}
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('startDiv').style.display = 'none';
+  runTrial();
+});
+document.querySelectorAll('.respBtn').forEach(btn => {
+  btn.addEventListener('click', () => handleSearchResp(btn.dataset.choice));
+});
+document.querySelectorAll('.memBtn').forEach(btn => {
+  btn.addEventListener('click', () => handleMemoryResp(btn.dataset.choice));
+});
+</script>
+</body>
+</html>
