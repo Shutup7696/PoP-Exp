@@ -12,8 +12,7 @@
 </head>
 <body>
   <h2>PoP Priming Experiment (Digit WM)</h2>
-  <canvas id="annulus" width="200" height="200"></canvas>
-  <canvas id="canvas" width="600" height="300"></canvas>
+  <canvas id="canvas" width="600" height="600"></canvas>
 
   <div id="startDiv">
     <button id="startBtn">Start Experiment</button>
@@ -41,16 +40,27 @@ let trialIdx = 0, startTime = 0;
 let memoryBuffer = null;
 let trialLog = [], currentTrial = null;
 
-const ann = document.getElementById('annulus'), aCtx = ann.getContext('2d');
 const canvas = document.getElementById('canvas'), ctx = canvas.getContext('2d');
+const centerX = canvas.width / 2;
+const centerY = canvas.height / 2;
 
-function drawAnnulus(color) {
-  aCtx.clearRect(0,0,200,200);
-  aCtx.lineWidth = 20;
-  aCtx.strokeStyle = color;
-  aCtx.beginPath();
-  aCtx.arc(100,100,80,0,2*Math.PI);
-  aCtx.stroke();
+function drawAnnulusAndFixation(color) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Annulus
+  ctx.lineWidth = 20;
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, 200, 0, 2 * Math.PI);
+  ctx.stroke();
+  // Fixation cross
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(centerX - 10, centerY);
+  ctx.lineTo(centerX + 10, centerY);
+  ctx.moveTo(centerX, centerY - 10);
+  ctx.lineTo(centerX, centerY + 10);
+  ctx.stroke();
 }
 
 function drawItem(x, y, size, color, notch) {
@@ -73,6 +83,11 @@ function drawItem(x, y, size, color, notch) {
   ctx.closePath(); ctx.fill();
 }
 
+function getSymmetricPositions(radius = 150) {
+  const angles = [0, 120, 240].map(deg => deg * Math.PI / 180);
+  return angles.map(a => [centerX + radius * Math.cos(a), centerY + radius * Math.sin(a)]);
+}
+
 function generateTrial() {
   const isMemory = memoryBuffer === null && Math.random() < 0.25;
   const block = Math.floor(trialIdx / 20) % 2;
@@ -82,9 +97,10 @@ function generateTrial() {
 
 function runTrial() {
   const tr = generateTrial();
-  ctx.clearRect(0,0,600,300);
   const annColor = tr.isMemory ? 'white' : 'black';
-  drawAnnulus(annColor);
+  drawAnnulusAndFixation(annColor);
+
+  const positions = getSymmetricPositions();
 
   if (tr.isMemory) {
     // Digit memory encode
@@ -109,7 +125,7 @@ function runTrial() {
     const colors = [tr.tCol, tr.dCol, tr.dCol].sort(() => Math.random()-0.5);
     const notch = colors.map(() => Math.random()<0.5?'up':'down');
     const correct = notch[colors.indexOf(tr.tCol)];
-    [150,300,450].forEach((x,i) => drawItem(x,150,50,colors[i],notch[i]));
+    positions.forEach((pos, i) => drawItem(pos[0], pos[1], 50, colors[i], notch[i]));
     document.getElementById('respDiv').style.display = 'block';
     currentTrial = { ...tr, task: 'search', colors, notch, correct };
     startTime = Date.now();
