@@ -25,5 +25,159 @@
     <div id="digitDisplay"></div>
   </div>
   <div id="recallDiv" style="display:none;">
-    <input type="text" id="recallInput"
+    <input type="text" id="recallInput" maxlength="5" placeholder="Enter digits" />
+    <button id="recallBtn">Submit</button>
+  </div>
+  <p id="status"></p>
 
+<script>
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxG_UikVlyzJxj_kFZV53337XGkwpcX62qf1-f5Qfi5gNv7paXurH6oJ6a43j4kqav1hA/exec';
+const BLOCK_COLORS = [['red','green'], ['red','green']];
+const TOTAL_TRIALS = 40;
+const DIGIT_LENGTH = 5;
+const DELAY_RECALL_TRIALS = 3;
+let subj = 'subj_' + Date.now();
+let trialIdx = 0, startTime = 0;
+let memoryBuffer = null;
+let memoryTrialCountdown = 0;
+let currentTrial = null;
+
+const canvas = document.getElementById('canvas'), ctx = canvas.getContext('2d');
+const centerX = canvas.width / 2;
+const centerY = canvas.height / 2;
+
+function drawAnnulusAndFixation(color) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.lineWidth = 20;
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, 200, 0, 2 * Math.PI);
+  ctx.stroke();
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(centerX - 10, centerY);
+  ctx.lineTo(centerX + 10, centerY);
+  ctx.moveTo(centerX, centerY - 10);
+  ctx.lineTo(centerX, centerY + 10);
+  ctx.stroke();
+}
+
+function drawItem(x, y, size, color, notch) {
+  const halfH = size / 2;
+  const halfW = size * 0.4;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x, y - halfH);
+  ctx.lineTo(x + halfW, y);
+  ctx.lineTo(x, y + halfH);
+  ctx.lineTo(x - halfW, y);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#ccc';
+  const cutHeight = halfH * 0.5;
+  if (notch === 'up') {
+    ctx.fillRect(x - halfW * 0.6, y - halfH, halfW * 1.2, cutHeight);
+  } else {
+    ctx.fillRect(x - halfW * 0.6, y + halfH - cutHeight, halfW * 1.2, cutHeight);
+  }
+}
+
+function getSymmetricPositions(radius = 100) {
+  const angles = [0, 120, 240].map(deg => deg * Math.PI / 180);
+  return angles.map(a => [centerX + radius * Math.cos(a), centerY + radius * Math.sin(a)]);
+}
+
+function generateTrial() {
+  const block = Math.floor(trialIdx / 20) % 2;
+  const colorPair = BLOCK_COLORS[block];
+  const isTargetFirst = Math.random() < 0.5;
+  const tCol = isTargetFirst ? colorPair[0] : colorPair[1];
+  const dCol = isTargetFirst ? colorPair[1] : colorPair[0];
+  const isMemory = memoryBuffer === null && Math.random() < 0.25 && memoryTrialCountdown === 0;
+  return { trial_number: trialIdx + 1, block, tCol, dCol, isMemory };
+}
+
+function runTrial() {
+  const tr = generateTrial();
+  const annColor = tr.isMemory ? 'white' : 'black';
+  drawAnnulusAndFixation(annColor);
+  const positions = getSymmetricPositions(100);
+
+  if (tr.isMemory) {
+    const digits = Array.from({length:DIGIT_LENGTH}, () => Math.floor(Math.random()*10)).join('');
+    memoryBuffer = digits;
+    memoryTrialCountdown = DELAY_RECALL_TRIALS;
+    document.getElementById('digitDiv').style.display = 'block';
+    document.getElementById('digitDisplay').innerText = digits;
+    setTimeout(() => {
+      document.getElementById('digitDiv').style.display = 'none';
+      saveTrial({ ...tr, task: 'digit_encode' });
+      nextTrial();
+    }, 1000);
+
+  } else if (memoryBuffer !== null && memoryTrialCountdown === 0) {
+    document.getElementById('recallDiv').style.display = 'block';
+    currentTrial = { ...tr, task: 'digit_recall', correct: memoryBuffer };
+    startTime = Date.now();
+
+  } else {
+    if (memoryTrialCountdown > 0) memoryTrialCountdown--;
+
+    const positions = getSymmetricPositions(100);
+    const targetIndex = Math.floor(Math.random() * 3);
+    const colors = [tr.dCol, tr.dCol, tr.dCol];
+    colors[targetIndex] = tr.tCol;
+
+    const notch = ['down', 'down', 'down'];
+    notch[targetIndex] = Math.random() < 0.5 ? 'up' : 'down';
+    const correct = notch[targetIndex];
+
+    positions.forEach((pos, i) => drawItem(pos[0], pos[1], 80, colors[i], notch[i]));
+    document.getElementById('respDiv').style.display = 'block';
+    currentTrial = { ...tr, task: 'search', colors, notch, correct };
+    startTime = Date.now();
+  }
+}
+
+function handleSearchResp(ans) {
+  document.getElementById('respDiv').style.display = 'none';
+  const rt = Date.now() - startTime;
+  const correct = (ans === currentTrial.correct);
+  saveTrial({ ...currentTrial, response: ans, rt_ms: rt, is_correct: correct });
+  nextTrial();
+}
+
+function handleRecall() {
+  const ans = document.getElementById('recallInput').value;
+  document.getElementById('recallDiv').style.display = 'none';
+  const rt = Date.now() - startTime;
+  const correct = (ans === currentTrial.correct);
+  saveTrial({ ...currentTrial, response: ans, rt_ms: rt, is_correct: correct });
+  memoryBuffer = null;
+  document.getElementById('recallInput').value = '';
+  nextTrial();
+}
+
+function saveTrial(data) {
+  fetch(WEB_APP_URL, {
+    method: 'POST', body: JSON.stringify({ subject_id: subj, ...data })
+  }).catch(console.error);
+}
+
+function nextTrial() {
+  trialIdx++;
+  if (trialIdx < TOTAL_TRIALS) runTrial();
+  else document.getElementById('status').innerText = 'Experiment complete';
+}
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('startDiv').style.display = 'none';
+  runTrial();
+});
+document.querySelectorAll('.respBtn').forEach(btn => btn.addEventListener('click', () => handleSearchResp(btn.dataset.choice)));
+document.getElementById('recallBtn').addEventListener('click', handleRecall);
+</script>
+</body>
+</html>
