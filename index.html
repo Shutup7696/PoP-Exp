@@ -32,13 +32,13 @@
 
 <script>
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxG_UikVlyzJxj_kFZV53337XGkwpcX62qf1-f5Qfi5gNv7paXurH6oJ6a43j4kqav1hA/exec';
-const BLOCK_COLORS = [['red','green'], ['red','green']]; // 固定化
+const BLOCK_COLORS = [['red','green'], ['red','green']];
 const TOTAL_TRIALS = 40;
 const DIGIT_LENGTH = 5;
 let subj = 'subj_' + Date.now();
 let trialIdx = 0, startTime = 0;
 let memoryBuffer = null;
-let trialLog = [], currentTrial = null;
+let currentTrial = null;
 
 const canvas = document.getElementById('canvas'), ctx = canvas.getContext('2d');
 const centerX = canvas.width / 2;
@@ -166,5 +166,3 @@ document.getElementById('recallBtn').addEventListener('click', handleRecall);
 </script>
 </body>
 </html>
-
-
