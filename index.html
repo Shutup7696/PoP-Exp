@@ -32,7 +32,7 @@
 
 <script>
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxG_UikVlyzJxj_kFZV53337XGkwpcX62qf1-f5Qfi5gNv7paXurH6oJ6a43j4kqav1hA/exec';
-const BLOCK_COLORS = [['red','green'], ['blue','yellow']];
+const BLOCK_COLORS = [['red','green'], ['red','green']]; // 固定化
 const TOTAL_TRIALS = 40;
 const DIGIT_LENGTH = 5;
 let subj = 'subj_' + Date.now();
@@ -46,13 +46,11 @@ const centerY = canvas.height / 2;
 
 function drawAnnulusAndFixation(color) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // Annulus
   ctx.lineWidth = 20;
   ctx.strokeStyle = color;
   ctx.beginPath();
   ctx.arc(centerX, centerY, 200, 0, 2 * Math.PI);
   ctx.stroke();
-  // Fixation cross
   ctx.strokeStyle = 'white';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -64,26 +62,25 @@ function drawAnnulusAndFixation(color) {
 }
 
 function drawItem(x, y, size, color, notch) {
-  const h=size, w=size*0.7;
-  ctx.fillStyle=color;
+  const halfH = size / 2;
+  const halfW = size * 0.4;
+  ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.moveTo(x,y-h); ctx.lineTo(x+w,y);
-  ctx.lineTo(x,y+h); ctx.lineTo(x-w,y);
-  ctx.closePath(); ctx.fill();
-  ctx.fillStyle='#ccc'; ctx.beginPath();
-  if(notch==='up') {
-    ctx.moveTo(x,y-h);
-    ctx.lineTo(x-w*0.3,y-h+h*0.4);
-    ctx.lineTo(x+w*0.3,y-h+h*0.4);
+  ctx.moveTo(x, y - halfH);
+  ctx.lineTo(x + halfW, y);
+  ctx.lineTo(x, y + halfH);
+  ctx.lineTo(x - halfW, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#ccc';
+  if (notch === 'up') {
+    ctx.fillRect(x - halfW, y - halfH - 1, halfW * 2, halfH);
   } else {
-    ctx.moveTo(x,y+h);
-    ctx.lineTo(x-w*0.3,y+h-h*0.4);
-    ctx.lineTo(x+w*0.3,y+h-h*0.4);
+    ctx.fillRect(x - halfW, y, halfW * 2, halfH + 1);
   }
-  ctx.closePath(); ctx.fill();
 }
 
-function getSymmetricPositions(radius = 150) {
+function getSymmetricPositions(radius = 100) {
   const angles = [0, 120, 240].map(deg => deg * Math.PI / 180);
   return angles.map(a => [centerX + radius * Math.cos(a), centerY + radius * Math.sin(a)]);
 }
@@ -100,10 +97,9 @@ function runTrial() {
   const annColor = tr.isMemory ? 'white' : 'black';
   drawAnnulusAndFixation(annColor);
 
-  const positions = getSymmetricPositions();
+  const positions = getSymmetricPositions(100);
 
   if (tr.isMemory) {
-    // Digit memory encode
     const digits = Array.from({length:DIGIT_LENGTH}, () => Math.floor(Math.random()*10)).join('');
     memoryBuffer = digits;
     document.getElementById('digitDiv').style.display = 'block';
@@ -115,17 +111,15 @@ function runTrial() {
     }, 1000);
 
   } else if (memoryBuffer !== null) {
-    // Recall trial
     document.getElementById('recallDiv').style.display = 'block';
     currentTrial = { ...tr, task: 'digit_recall', correct: memoryBuffer };
     startTime = Date.now();
 
   } else {
-    // Search trial
-    const colors = [tr.tCol, tr.dCol, tr.dCol].sort(() => Math.random()-0.5);
-    const notch = colors.map(() => Math.random()<0.5?'up':'down');
+    const colors = [tr.tCol, tr.dCol, tr.dCol].sort(() => Math.random() - 0.5);
+    const notch = colors.map(() => Math.random() < 0.5 ? 'up' : 'down');
     const correct = notch[colors.indexOf(tr.tCol)];
-    positions.forEach((pos, i) => drawItem(pos[0], pos[1], 50, colors[i], notch[i]));
+    positions.forEach((pos, i) => drawItem(pos[0], pos[1], 80, colors[i], notch[i]));
     document.getElementById('respDiv').style.display = 'block';
     currentTrial = { ...tr, task: 'search', colors, notch, correct };
     startTime = Date.now();
@@ -172,3 +166,5 @@ document.getElementById('recallBtn').addEventListener('click', handleRecall);
 </script>
 </body>
 </html>
+
+
