@@ -18,32 +18,23 @@
     <button id="startBtn">Start Experiment</button>
   </div>
   <div id="respDiv" style="display:none;">
-    <p>Press F for Notch Up, J for Notch Down</p>
+    <button class="respBtn" data-choice="up">Notch Up</button>
+    <button class="respBtn" data-choice="down">Notch Down</button>
   </div>
   <div id="digitDiv" style="display:none;">
     <div id="digitDisplay"></div>
   </div>
   <div id="recallDiv" style="display:none;">
-    <input type="text" id="recallInput" maxlength="9" placeholder="Enter digits" />
-    <select id="colorSelect">
-      <option value="">Select Color</option>
-      <option value="white">White</option>
-      <option value="red">Red</option>
-      <option value="green">Green</option>
-    </select>
+    <input type="text" id="recallInput" maxlength="5" placeholder="Enter digits" />
     <button id="recallBtn">Submit</button>
   </div>
   <p id="status"></p>
 
 <script>
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxG_UikVlyzJxj_kFZV53337XGkwpcX62qf1-f5Qfi5gNv7paXurH6oJ6a43j4kqav1hA/exec';
-const TOTAL_TRIALS = 80;
-const BLOCKS = [
-  { digitLen: 5, color: 'white' },
-  { digitLen: 9, color: 'white' },
-  { digitLen: 5, color: 'random' },
-  { digitLen: 9, color: 'random' }
-];
+const BLOCK_COLORS = [['red','green'], ['red','green']];
+const TOTAL_TRIALS = 40;
+const DIGIT_LENGTH = 5;
 const DELAY_RECALL_TRIALS = 3;
 let subj = 'subj_' + Date.now();
 let trialIdx = 0, startTime = 0;
@@ -99,58 +90,42 @@ function getSymmetricPositions(radius = 100) {
 }
 
 function generateTrial() {
-  const blockIdx = Math.floor(trialIdx / (TOTAL_TRIALS / BLOCKS.length));
-  const block = BLOCKS[blockIdx];
+  const block = Math.floor(trialIdx / 20) % 2;
+  const colorPair = BLOCK_COLORS[block];
+  const isTargetFirst = Math.random() < 0.5;
+  const tCol = isTargetFirst ? colorPair[0] : colorPair[1];
+  const dCol = isTargetFirst ? colorPair[1] : colorPair[0];
   const isMemory = memoryBuffer === null && Math.random() < 0.25 && memoryTrialCountdown === 0;
-
-  let digitColor = block.color;
-  if (digitColor === 'random') digitColor = Math.random() < 0.5 ? 'red' : 'green';
-
-  const colorPair = Math.random() < 0.5 ? ['red', 'green'] : ['green', 'red'];
-  const [tCol, dCol] = colorPair;
-
-  return {
-    trial_number: trialIdx + 1,
-    block: blockIdx + 1,
-    tCol, dCol,
-    digitLen: block.digitLen,
-    digitColor,
-    isMemory
-  };
+  return { trial_number: trialIdx + 1, block, tCol, dCol, isMemory };
 }
 
 function runTrial() {
   const tr = generateTrial();
-  drawAnnulusAndFixation(tr.isMemory ? 'white' : 'black');
-  setTimeout(() => proceedWithTrial(tr), 1000);
-}
-
-function proceedWithTrial(tr) {
+  const annColor = tr.isMemory ? 'white' : 'black';
+  drawAnnulusAndFixation(annColor);
   const positions = getSymmetricPositions(100);
+
   if (tr.isMemory) {
-    const digits = Array.from({length: tr.digitLen}, () => Math.floor(Math.random()*10)).join('');
-    memoryBuffer = { digits, color: tr.digitColor };
+    const digits = Array.from({length:DIGIT_LENGTH}, () => Math.floor(Math.random()*10)).join('');
+    memoryBuffer = digits;
     memoryTrialCountdown = DELAY_RECALL_TRIALS;
-
     document.getElementById('digitDiv').style.display = 'block';
-    const digitDisplay = document.getElementById('digitDisplay');
-    digitDisplay.innerText = digits;
-    digitDisplay.style.color = tr.digitColor;
-
+    document.getElementById('digitDisplay').innerText = digits;
     setTimeout(() => {
       document.getElementById('digitDiv').style.display = 'none';
-      saveTrial({ ...tr, task: 'digit_encode', encoded_digits: digits });
+      saveTrial({ ...tr, task: 'digit_encode' });
       nextTrial();
     }, 1000);
 
   } else if (memoryBuffer !== null && memoryTrialCountdown === 0) {
     document.getElementById('recallDiv').style.display = 'block';
-    currentTrial = { ...tr, task: 'digit_recall', correct_digits: memoryBuffer.digits, correct_color: memoryBuffer.color };
+    currentTrial = { ...tr, task: 'digit_recall', correct: memoryBuffer };
     startTime = Date.now();
 
   } else {
     if (memoryTrialCountdown > 0) memoryTrialCountdown--;
 
+    const positions = getSymmetricPositions(100);
     const targetIndex = Math.floor(Math.random() * 3);
     const colors = [tr.dCol, tr.dCol, tr.dCol];
     colors[targetIndex] = tr.tCol;
@@ -176,23 +151,18 @@ function handleSearchResp(ans) {
 
 function handleRecall() {
   const ans = document.getElementById('recallInput').value;
-  const color = document.getElementById('colorSelect').value;
   document.getElementById('recallDiv').style.display = 'none';
-
   const rt = Date.now() - startTime;
-  const correct = (ans === currentTrial.correct_digits && color === currentTrial.correct_color);
-  saveTrial({ ...currentTrial, response_digits: ans, response_color: color, rt_ms: rt, is_correct: correct });
-
+  const correct = (ans === currentTrial.correct);
+  saveTrial({ ...currentTrial, response: ans, rt_ms: rt, is_correct: correct });
   memoryBuffer = null;
   document.getElementById('recallInput').value = '';
-  document.getElementById('colorSelect').value = '';
   nextTrial();
 }
 
 function saveTrial(data) {
   fetch(WEB_APP_URL, {
-    method: 'POST',
-    body: JSON.stringify({ subject_id: subj, ...data })
+    method: 'POST', body: JSON.stringify({ subject_id: subj, ...data })
   }).catch(console.error);
 }
 
@@ -206,14 +176,8 @@ document.getElementById('startBtn').addEventListener('click', () => {
   document.getElementById('startDiv').style.display = 'none';
   runTrial();
 });
-
+document.querySelectorAll('.respBtn').forEach(btn => btn.addEventListener('click', () => handleSearchResp(btn.dataset.choice)));
 document.getElementById('recallBtn').addEventListener('click', handleRecall);
-
-document.addEventListener('keydown', e => {
-  if (!document.getElementById('respDiv').style.display.includes('block')) return;
-  if (e.key === 'f' || e.key === 'F') handleSearchResp('up');
-  if (e.key === 'j' || e.key === 'J') handleSearchResp('down');
-});
 </script>
 </body>
 </html>
