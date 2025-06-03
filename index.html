@@ -35,9 +35,11 @@ const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxG_UikVlyzJxj_kFZV
 const BLOCK_COLORS = [['red','green'], ['red','green']];
 const TOTAL_TRIALS = 40;
 const DIGIT_LENGTH = 5;
+const DELAY_RECALL_TRIALS = 3;
 let subj = 'subj_' + Date.now();
 let trialIdx = 0, startTime = 0;
 let memoryBuffer = null;
+let memoryTrialCountdown = 0;
 let currentTrial = null;
 
 const canvas = document.getElementById('canvas'), ctx = canvas.getContext('2d');
@@ -72,11 +74,13 @@ function drawItem(x, y, size, color, notch) {
   ctx.lineTo(x - halfW, y);
   ctx.closePath();
   ctx.fill();
+
   ctx.fillStyle = '#ccc';
+  const cutHeight = halfH * 0.5;
   if (notch === 'up') {
-    ctx.fillRect(x - halfW, y - halfH - 1, halfW * 2, halfH);
+    ctx.fillRect(x - halfW * 0.6, y - halfH, halfW * 1.2, cutHeight);
   } else {
-    ctx.fillRect(x - halfW, y, halfW * 2, halfH + 1);
+    ctx.fillRect(x - halfW * 0.6, y + halfH - cutHeight, halfW * 1.2, cutHeight);
   }
 }
 
@@ -86,9 +90,9 @@ function getSymmetricPositions(radius = 100) {
 }
 
 function generateTrial() {
-  const isMemory = memoryBuffer === null && Math.random() < 0.25;
   const block = Math.floor(trialIdx / 20) % 2;
   const [tCol, dCol] = BLOCK_COLORS[block];
+  const isMemory = memoryBuffer === null && Math.random() < 0.25 && memoryTrialCountdown === 0;
   return { trial_number: trialIdx + 1, block, tCol, dCol, isMemory };
 }
 
@@ -96,12 +100,12 @@ function runTrial() {
   const tr = generateTrial();
   const annColor = tr.isMemory ? 'white' : 'black';
   drawAnnulusAndFixation(annColor);
-
   const positions = getSymmetricPositions(100);
 
   if (tr.isMemory) {
     const digits = Array.from({length:DIGIT_LENGTH}, () => Math.floor(Math.random()*10)).join('');
     memoryBuffer = digits;
+    memoryTrialCountdown = DELAY_RECALL_TRIALS;
     document.getElementById('digitDiv').style.display = 'block';
     document.getElementById('digitDisplay').innerText = digits;
     setTimeout(() => {
@@ -110,15 +114,23 @@ function runTrial() {
       nextTrial();
     }, 1000);
 
-  } else if (memoryBuffer !== null) {
+  } else if (memoryBuffer !== null && memoryTrialCountdown === 0) {
     document.getElementById('recallDiv').style.display = 'block';
     currentTrial = { ...tr, task: 'digit_recall', correct: memoryBuffer };
     startTime = Date.now();
 
   } else {
-    const colors = [tr.tCol, tr.dCol, tr.dCol].sort(() => Math.random() - 0.5);
-    const notch = colors.map(() => Math.random() < 0.5 ? 'up' : 'down');
-    const correct = notch[colors.indexOf(tr.tCol)];
+    if (memoryTrialCountdown > 0) memoryTrialCountdown--;
+
+    const positions = getSymmetricPositions(100);
+    const targetIndex = Math.floor(Math.random() * 3);
+    const colors = [tr.dCol, tr.dCol, tr.dCol];
+    colors[targetIndex] = tr.tCol;
+
+    const notch = ['down', 'down', 'down'];
+    notch[targetIndex] = Math.random() < 0.5 ? 'up' : 'down';
+    const correct = notch[targetIndex];
+
     positions.forEach((pos, i) => drawItem(pos[0], pos[1], 80, colors[i], notch[i]));
     document.getElementById('respDiv').style.display = 'block';
     currentTrial = { ...tr, task: 'search', colors, notch, correct };
