@@ -227,11 +227,11 @@ function runTrial() {
         block: cond.block
       });
 
-      // 3 秒後に数字を隠して次試行へ
+      // 5 秒後に数字を隠して次試行へ (＋2秒延長)
       setTimeout(() => {
         digitDiv.style.display = 'none';
         nextTrial();
-      }, 3000);
+      }, 5000);
 
     // 2) phase === 21: リコール  (修正)
     } else if (phase === trialsPerMemoryBlock - 1) {
@@ -350,7 +350,6 @@ document.getElementById('startBtn').addEventListener('click', () => {
   document.getElementById('startDiv').style.display = 'none';
   runTrial();
 });
-
 document.getElementById('recallBtn').addEventListener('click', handleRecall);
 </script>
 </body>
