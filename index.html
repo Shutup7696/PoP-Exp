@@ -7,7 +7,7 @@
     body { text-align:center; font-family:sans-serif; margin-top:30px; }
     canvas { background:#ccc; display:block; margin:10px auto; }
     button, input, select { padding:10px 20px; font-size:18px; margin:10px; }
-    #digitDisplay { font-size:32px; font-weight:bold; margin:20px; }
+    #digitDisplay { font-size:32px; font-weight:bold; margin:20px; color: white; }
   </style>
 </head>
 <body>
@@ -18,17 +18,14 @@
     <button id="startBtn">Start Experiment</button>
   </div>
 
-  <!-- 数字列表示用エリア -->
   <div id="digitDiv" style="display:none;">
     <div id="digitDisplay"></div>
   </div>
 
-  <!-- 視覚探索回答プロンプト -->
   <div id="respDiv" style="display:none;">
     <p>Press F for Notch Up, J for Notch Down</p>
   </div>
 
-  <!-- 数字列リコール用エリア -->
   <div id="recallDiv" style="display:none;">
     <input type="text" id="recallInput" maxlength="5" placeholder="Enter digits" />
     <select id="colorSelect">
@@ -43,40 +40,30 @@
   <p id="status"></p>
 
 <script>
-/** Google Apps Script のエンドポイント */
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxG_UikVlyzJxj_kFZV53337XGkwpcX62qf1-f5Qfi5gNv7paXurH6oJ6a43j4kqav1hA/exec';
 
-// Canvas とそのコンテキスト取得
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const centerX = canvas.width / 2;
 const centerY = canvas.height / 2;
 
-// 定数設定
-const TOTAL_TRIALS = 40;       // 全体試行数
-const DIGIT_DISPLAY_TIME = 5000; // 数字列提示 5000ms (5秒)
-const SEARCH_PREP_TIME = 1000;   // 視覚探索刺激提示前の待機 1000ms
-const DELAY_RECALL_TRIALS = 3; // エンコード後、リコールまでの探索試行数
+const TOTAL_TRIALS = 40;
+let trialIdx = 0;
+let memoryBuffer = null;
+let memoryColor = null;
+let memoryTrialCountdown = 0;
+let currentTrial = null;
+let startTime = 0;
+let subj = 'subj_' + Date.now();
 
-// 実験状態変数
-let trialIdx = 0;                 // 現在の試行インデックス (0-based)
-let memoryBuffer = null;          // 現在保持中の数字列 (string)
-let memoryColor = null;           // 現在保持中の数字列の色 ('white'/'red'/'green')
-let memoryTrialCountdown = 0;     // 次のリコールまでの探索試行カウントダウン
-let currentTrial = null;          // 現在の試行情報オブジェクト
-let startTime = 0;                // RT計測用タイムスタンプ
-const subj = 'subj_' + Date.now(); // 被験者ID
-
-/** 円環と注視点を描画する */
 function drawAnnulusAndFixation(color) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // 円環
   ctx.lineWidth = 20;
   ctx.strokeStyle = color;
   ctx.beginPath();
   ctx.arc(centerX, centerY, 200, 0, 2 * Math.PI);
   ctx.stroke();
-  // 注視点 (白い十字)
+
   ctx.strokeStyle = 'white';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -87,7 +74,6 @@ function drawAnnulusAndFixation(color) {
   ctx.stroke();
 }
 
-/** ひし形刺激を描画する */
 function drawItem(x, y, size, color, notch) {
   const halfH = size / 2;
   const halfW = size * 0.4;
@@ -99,7 +85,7 @@ function drawItem(x, y, size, color, notch) {
   ctx.lineTo(x - halfW, y);
   ctx.closePath();
   ctx.fill();
-  // ノッチ部分を灰色で塗りつぶし
+
   ctx.fillStyle = '#ccc';
   const cutHeight = halfH * 0.5;
   if (notch === 'up') {
@@ -109,106 +95,73 @@ function drawItem(x, y, size, color, notch) {
   }
 }
 
-/** 中心を起点に正三角形の頂点配列を返す */
 function getSymmetricPositions(radius = 100) {
   const angles = [0, 120, 240].map(deg => deg * Math.PI / 180);
   return angles.map(a => [centerX + radius * Math.cos(a), centerY + radius * Math.sin(a)]);
 }
 
-/** 指定された長さのランダム数字列を生成 */
 function generateDigits(length) {
-  let s = '';
-  for (let i = 0; i < length; i++) {
-    s += Math.floor(Math.random() * 10).toString();
-  }
-  return s;
+  return Array.from({length}, () => Math.floor(Math.random() * 10)).join('');
 }
 
-/**
- * trialIdx を基に試行情報を生成する
- * - block: 1〜4 (2桁白→block1、5桁白→2、2桁カラー→3、5桁カラー→4)
- * - isMemory: メモリエンコードか否か
- * - tCol, dCol: ターゲット色/ディストラクタ色
- * - digitLength: 2 or 5
- * - digitColor: 'white' or tCol/dCol
- */
 function generateTrial() {
-  // メモリエンコード判定
-  const isMemory = (memoryBuffer === null && Math.random() < 0.25 && memoryTrialCountdown === 0);
-
-  // ターゲット色/ディストラクタ色をランダムに決定
+  const isMemory = memoryBuffer === null && Math.random() < 0.25 && memoryTrialCountdown === 0;
   const tCol = Math.random() < 0.5 ? 'red' : 'green';
   const dCol = (tCol === 'red') ? 'green' : 'red';
+  const digitLength = Math.random() < 0.5 ? 2 : 5;
+  const digitColor = Math.random() < 0.5 ? 'white' : tCol;
 
-  // 数字列長と色をランダムに決定
-  const digitLength = (Math.random() < 0.5) ? 2 : 5;
-  const digitColor = (Math.random() < 0.5) ? 'white' : tCol;
-
-  // ブロック番号の決定
   let block;
   if (digitLength === 2 && digitColor === 'white') block = 1;
   else if (digitLength === 5 && digitColor === 'white') block = 2;
-  else if (digitLength === 2 && digitColor !== 'white') block = 3;
+  else if (digitLength === 2) block = 3;
   else block = 4;
 
   return {
     trial_number: trialIdx + 1,
-    isMemory,
-    tCol,
-    dCol,
-    digitLength,
-    digitColor,
+    tCol, dCol, isMemory,
+    digitLength, digitColor,
     block
   };
 }
 
-/** 1試行を実行 */
 function runTrial() {
   const tr = generateTrial();
-  currentTrial = { ...tr }; // currentTrial に情報を保存しておく
+  currentTrial = tr;
 
   if (tr.isMemory) {
-    // --- 数字列提示フェーズ (白円環) ---
     memoryBuffer = generateDigits(tr.digitLength);
     memoryColor = tr.digitColor;
-    memoryTrialCountdown = DELAY_RECALL_TRIALS;
+    memoryTrialCountdown = 3;
+
+    const digitDiv = document.getElementById('digitDiv');
+    const digitDisplay = document.getElementById('digitDisplay');
+    digitDisplay.innerText = memoryBuffer;
+    digitDisplay.style.color = memoryColor;
+    digitDiv.style.display = 'block';
 
     drawAnnulusAndFixation('white');
-    document.getElementById('digitDisplay').innerText = memoryBuffer;
-    document.getElementById('digitDisplay').style.color = memoryColor;
-    document.getElementById('digitDiv').style.display = 'block';
 
-    // encodeデータを送信
-    saveTrial({
-      ...tr,
-      task: 'digit_encode',
-      digits: memoryBuffer,
-      digit_color: memoryColor
-    });
-
-    // 5秒後に数字列を隠して次試行
     setTimeout(() => {
-      document.getElementById('digitDiv').style.display = 'none';
-      nextTrial();
-    }, DIGIT_DISPLAY_TIME);
+      digitDiv.style.display = 'none';
+      saveTrial({
+        ...tr,
+        task: 'digit_encode',
+        digits: memoryBuffer,
+        digit_color: memoryColor
+      });
+      setTimeout(runTrial, 1000);
+    }, 5000);
 
   } else if (memoryBuffer !== null && memoryTrialCountdown === 0) {
-    // --- リコールフェーズ (白円環) ---
     drawAnnulusAndFixation('white');
     document.getElementById('recallDiv').style.display = 'block';
     startTime = Date.now();
-
-    // currentTrial にリコール情報を追記
-    currentTrial.task = 'digit_recall';
-    currentTrial.correct_digits = memoryBuffer;
-    currentTrial.correct_color = memoryColor;
+    currentTrial = {...tr, task: 'digit_recall', correct_digits: memoryBuffer, correct_color: memoryColor};
 
   } else {
-    // --- 視覚探索フェーズ (黒円環 → 1,000ms 後にひし形を描画) ---
     if (memoryTrialCountdown > 0) memoryTrialCountdown--;
-
     drawAnnulusAndFixation('black');
-
     setTimeout(() => {
       const positions = getSymmetricPositions();
       const targetIndex = Math.floor(Math.random() * 3);
@@ -219,52 +172,29 @@ function runTrial() {
       notches[targetIndex] = Math.random() < 0.5 ? 'up' : 'down';
       const correct = notches[targetIndex];
 
-      positions.forEach((pos, i) => {
-        drawItem(pos[0], pos[1], 80, colors[i], notches[i]);
-      });
-
+      positions.forEach((pos, i) => drawItem(pos[0], pos[1], 80, colors[i], notches[i]));
       document.getElementById('respDiv').style.display = 'block';
       startTime = Date.now();
-
-      currentTrial.task = 'search';
-      currentTrial.colors = colors;
-      currentTrial.notches = notches;
-      currentTrial.correct = correct;
-    }, SEARCH_PREP_TIME);
+      currentTrial = {...tr, task: 'search', colors, notches, correct};
+    }, 1000);
   }
 }
 
-/** 探索課題のキー応答 (Fキー / Jキー) */
 function handleSearchResp(ans) {
   document.getElementById('respDiv').style.display = 'none';
   const rt = Date.now() - startTime;
   const correct = (ans === currentTrial.correct);
-
-  saveTrial({
-    ...currentTrial,
-    response: ans,
-    rt_ms: rt,
-    is_correct: correct
-  });
+  saveTrial({...currentTrial, response: ans, rt_ms: rt, is_correct: correct});
   nextTrial();
 }
 
-/** 数字リコールのサブミット処理 */
 function handleRecall() {
-  const ansDigits = document.getElementById('recallInput').value.trim();
-  const ansColor = document.getElementById('colorSelect').value;
+  const ans = document.getElementById('recallInput').value.trim();
+  const color = document.getElementById('colorSelect').value;
   document.getElementById('recallDiv').style.display = 'none';
   const rt = Date.now() - startTime;
-  const correct = (ansDigits === currentTrial.correct_digits && ansColor === currentTrial.correct_color);
-
-  saveTrial({
-    ...currentTrial,
-    response_digits: ansDigits,
-    response_color: ansColor,
-    rt_ms: rt,
-    is_correct: correct
-  });
-
+  const correct = (ans === currentTrial.correct_digits && color === currentTrial.correct_color);
+  saveTrial({...currentTrial, response_digits: ans, response_color: color, rt_ms: rt, is_correct: correct});
   memoryBuffer = null;
   memoryColor = null;
   document.getElementById('recallInput').value = '';
@@ -272,40 +202,31 @@ function handleRecall() {
   nextTrial();
 }
 
-/** Google Apps Script にデータを送信 */
 function saveTrial(data) {
   fetch(WEB_APP_URL, {
     method: 'POST',
-    body: JSON.stringify({ subject_id: subj, ...data })
+    body: JSON.stringify({subject_id: subj, ...data})
   }).catch(console.error);
 }
 
-/** 次の試行を呼び出す */
 function nextTrial() {
   trialIdx++;
-  if (trialIdx < TOTAL_TRIALS) {
-    runTrial();
-  } else {
-    document.getElementById('status').innerText = 'Experiment complete';
-  }
+  if (trialIdx < TOTAL_TRIALS) runTrial();
+  else document.getElementById('status').innerText = 'Experiment complete';
 }
 
-// ==================== イベントリスナ ====================
-// Start ボタン
+// キー入力で応答
+document.addEventListener('keydown', e => {
+  if (document.getElementById('respDiv').style.display !== 'none') {
+    if (e.key === 'f') handleSearchResp('up');
+    else if (e.key === 'j') handleSearchResp('down');
+  }
+});
+
 document.getElementById('startBtn').addEventListener('click', () => {
   document.getElementById('startDiv').style.display = 'none';
   runTrial();
 });
-
-// キー入力 (探索課題中のみ有効：Fキー → 'up'、Jキー → 'down')
-document.addEventListener('keydown', e => {
-  if (document.getElementById('respDiv').style.display !== 'none') {
-    if (e.key.toLowerCase() === 'f') handleSearchResp('up');
-    else if (e.key.toLowerCase() === 'j') handleSearchResp('down');
-  }
-});
-
-// リコール回答の Submit
 document.getElementById('recallBtn').addEventListener('click', handleRecall);
 </script>
 </body>
