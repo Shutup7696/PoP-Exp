@@ -18,17 +18,17 @@
     <button id="startBtn">Start Experiment</button>
   </div>
 
-  <!-- 数字列提示用 -->
+  <!-- 数字列表示用エリア -->
   <div id="digitDiv" style="display:none;">
     <div id="digitDisplay"></div>
   </div>
 
-  <!-- 視覚探索応答案内 -->
+  <!-- 視覚探索回答プロンプト -->
   <div id="respDiv" style="display:none;">
     <p>Press F for Notch Up, J for Notch Down</p>
   </div>
 
-  <!-- 数字列リコール用 -->
+  <!-- 数字列リコール用エリア -->
   <div id="recallDiv" style="display:none;">
     <input type="text" id="recallInput" maxlength="5" placeholder="Enter digits" />
     <select id="colorSelect">
@@ -43,30 +43,40 @@
   <p id="status"></p>
 
 <script>
+/** Google Apps Script のエンドポイント */
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxG_UikVlyzJxj_kFZV53337XGkwpcX62qf1-f5Qfi5gNv7paXurH6oJ6a43j4kqav1hA/exec';
 
+// Canvas とそのコンテキスト取得
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const centerX = canvas.width / 2;
 const centerY = canvas.height / 2;
 
-const TOTAL_TRIALS = 40;
-let trialIdx = 0;
-let memoryBuffer = null;
-let memoryColor = null;
-let memoryTrialCountdown = 0;
-let currentTrial = null;
-let startTime = 0;
-let subj = 'subj_' + Date.now();
+// 定数設定
+const TOTAL_TRIALS = 40;       // 全体試行数
+const DIGIT_DISPLAY_TIME = 5000; // 数字列提示 5000ms (5秒)
+const SEARCH_PREP_TIME = 1000;   // 視覚探索刺激提示前の待機 1000ms
+const DELAY_RECALL_TRIALS = 3; // エンコード後、リコールまでの探索試行数
 
-/** 円環＋注視点を描画する */
+// 実験状態変数
+let trialIdx = 0;                 // 現在の試行インデックス (0-based)
+let memoryBuffer = null;          // 現在保持中の数字列 (string)
+let memoryColor = null;           // 現在保持中の数字列の色 ('white'/'red'/'green')
+let memoryTrialCountdown = 0;     // 次のリコールまでの探索試行カウントダウン
+let currentTrial = null;          // 現在の試行情報オブジェクト
+let startTime = 0;                // RT計測用タイムスタンプ
+const subj = 'subj_' + Date.now(); // 被験者ID
+
+/** 円環と注視点を描画する */
 function drawAnnulusAndFixation(color) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // 円環
   ctx.lineWidth = 20;
   ctx.strokeStyle = color;
   ctx.beginPath();
   ctx.arc(centerX, centerY, 200, 0, 2 * Math.PI);
   ctx.stroke();
+  // 注視点 (白い十字)
   ctx.strokeStyle = 'white';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -77,7 +87,7 @@ function drawAnnulusAndFixation(color) {
   ctx.stroke();
 }
 
-/** ひし形を描画する */
+/** ひし形刺激を描画する */
 function drawItem(x, y, size, color, notch) {
   const halfH = size / 2;
   const halfW = size * 0.4;
@@ -89,7 +99,7 @@ function drawItem(x, y, size, color, notch) {
   ctx.lineTo(x - halfW, y);
   ctx.closePath();
   ctx.fill();
-
+  // ノッチ部分を灰色で塗りつぶし
   ctx.fillStyle = '#ccc';
   const cutHeight = halfH * 0.5;
   if (notch === 'up') {
@@ -99,39 +109,42 @@ function drawItem(x, y, size, color, notch) {
   }
 }
 
-/** 3つのひし形を等間隔に並べる中心座標を取得 */
+/** 中心を起点に正三角形の頂点配列を返す */
 function getSymmetricPositions(radius = 100) {
   const angles = [0, 120, 240].map(deg => deg * Math.PI / 180);
   return angles.map(a => [centerX + radius * Math.cos(a), centerY + radius * Math.sin(a)]);
 }
 
-/** 長さ length のランダム数字列を生成 */
+/** 指定された長さのランダム数字列を生成 */
 function generateDigits(length) {
-  return Array.from({ length }, () => Math.floor(Math.random() * 10)).join('');
+  let s = '';
+  for (let i = 0; i < length; i++) {
+    s += Math.floor(Math.random() * 10).toString();
+  }
+  return s;
 }
 
 /**
- * 試行内容を生成
- * - isMemory: メモリ試行かどうか
- * - tCol, dCol: ターゲット色・ディストラクタ色
+ * trialIdx を基に試行情報を生成する
+ * - block: 1〜4 (2桁白→block1、5桁白→2、2桁カラー→3、5桁カラー→4)
+ * - isMemory: メモリエンコードか否か
+ * - tCol, dCol: ターゲット色/ディストラクタ色
  * - digitLength: 2 or 5
  * - digitColor: 'white' or tCol/dCol
- * - block: 1-4 を割り振る
  */
 function generateTrial() {
+  // メモリエンコード判定
   const isMemory = (memoryBuffer === null && Math.random() < 0.25 && memoryTrialCountdown === 0);
+
+  // ターゲット色/ディストラクタ色をランダムに決定
   const tCol = Math.random() < 0.5 ? 'red' : 'green';
   const dCol = (tCol === 'red') ? 'green' : 'red';
 
-  // 数字列の長さと色をランダムに決定
+  // 数字列長と色をランダムに決定
   const digitLength = (Math.random() < 0.5) ? 2 : 5;
   const digitColor = (Math.random() < 0.5) ? 'white' : tCol;
 
-  // block の決定：
-  // 2桁白 → block 1
-  // 5桁白 → block 2
-  // 2桁カラー → block 3
-  // 5桁カラー → block 4
+  // ブロック番号の決定
   let block;
   if (digitLength === 2 && digitColor === 'white') block = 1;
   else if (digitLength === 5 && digitColor === 'white') block = 2;
@@ -152,20 +165,20 @@ function generateTrial() {
 /** 1試行を実行 */
 function runTrial() {
   const tr = generateTrial();
-  currentTrial = { ...tr };
+  currentTrial = { ...tr }; // currentTrial に情報を保存しておく
 
   if (tr.isMemory) {
-    // --- 数字列提示フェーズ（白い円環） ---
+    // --- 数字列提示フェーズ (白円環) ---
     memoryBuffer = generateDigits(tr.digitLength);
     memoryColor = tr.digitColor;
-    memoryTrialCountdown = 3;
+    memoryTrialCountdown = DELAY_RECALL_TRIALS;
 
     drawAnnulusAndFixation('white');
-    document.getElementById('digitDisplay').style.color = memoryColor;
     document.getElementById('digitDisplay').innerText = memoryBuffer;
+    document.getElementById('digitDisplay').style.color = memoryColor;
     document.getElementById('digitDiv').style.display = 'block';
 
-    // データ保存（encode）
+    // encodeデータを送信
     saveTrial({
       ...tr,
       task: 'digit_encode',
@@ -173,23 +186,25 @@ function runTrial() {
       digit_color: memoryColor
     });
 
-    // 5秒後に非表示＆次試行
+    // 5秒後に数字列を隠して次試行
     setTimeout(() => {
       document.getElementById('digitDiv').style.display = 'none';
       nextTrial();
-    }, 5000);
+    }, DIGIT_DISPLAY_TIME);
 
   } else if (memoryBuffer !== null && memoryTrialCountdown === 0) {
-    // --- リコールフェーズ（白い円環） ---
+    // --- リコールフェーズ (白円環) ---
     drawAnnulusAndFixation('white');
     document.getElementById('recallDiv').style.display = 'block';
     startTime = Date.now();
+
+    // currentTrial にリコール情報を追記
     currentTrial.task = 'digit_recall';
     currentTrial.correct_digits = memoryBuffer;
     currentTrial.correct_color = memoryColor;
 
   } else {
-    // --- 視覚探索フェーズ（黒い円環 → 1000ms 後にひし形描画） ---
+    // --- 視覚探索フェーズ (黒円環 → 1,000ms 後にひし形を描画) ---
     if (memoryTrialCountdown > 0) memoryTrialCountdown--;
 
     drawAnnulusAndFixation('black');
@@ -210,15 +225,16 @@ function runTrial() {
 
       document.getElementById('respDiv').style.display = 'block';
       startTime = Date.now();
+
       currentTrial.task = 'search';
       currentTrial.colors = colors;
       currentTrial.notches = notches;
       currentTrial.correct = correct;
-    }, 1000);
+    }, SEARCH_PREP_TIME);
   }
 }
 
-/** 探索課題のキー応答 */
+/** 探索課題のキー応答 (Fキー / Jキー) */
 function handleSearchResp(ans) {
   document.getElementById('respDiv').style.display = 'none';
   const rt = Date.now() - startTime;
@@ -233,7 +249,7 @@ function handleSearchResp(ans) {
   nextTrial();
 }
 
-/** 数字リコールの回答処理 */
+/** 数字リコールのサブミット処理 */
 function handleRecall() {
   const ansDigits = document.getElementById('recallInput').value.trim();
   const ansColor = document.getElementById('colorSelect').value;
@@ -264,7 +280,7 @@ function saveTrial(data) {
   }).catch(console.error);
 }
 
-/** 次の試行へ */
+/** 次の試行を呼び出す */
 function nextTrial() {
   trialIdx++;
   if (trialIdx < TOTAL_TRIALS) {
@@ -274,13 +290,14 @@ function nextTrial() {
   }
 }
 
-// イベントリスナ設定
+// ==================== イベントリスナ ====================
+// Start ボタン
 document.getElementById('startBtn').addEventListener('click', () => {
   document.getElementById('startDiv').style.display = 'none';
   runTrial();
 });
 
-// キー応答 (探索課題中のみ)
+// キー入力 (探索課題中のみ有効：Fキー → 'up'、Jキー → 'down')
 document.addEventListener('keydown', e => {
   if (document.getElementById('respDiv').style.display !== 'none') {
     if (e.key.toLowerCase() === 'f') handleSearchResp('up');
@@ -288,7 +305,7 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// リコール回答のSubmit
+// リコール回答の Submit
 document.getElementById('recallBtn').addEventListener('click', handleRecall);
 </script>
 </body>
