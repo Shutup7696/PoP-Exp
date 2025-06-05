@@ -55,9 +55,9 @@ const centerY = canvas.height / 2;
 
 // ==================== 実験パラメータ ====================
 const initialSearchTrials = 30;                  // 最初の30試行は探索のみ
-const trialsPerMemoryBlock = 22;                 // 各ブロックは "表示(1) + 探索(20) + リコール(1)" = 22 試行
+const trialsPerMemoryBlock = 15;                 // 各ブロックは "表示(1) + 探索(13) + リコール(1)" = 15 試行
 const numMemoryBlocks = 8;                       // 4条件 × 2回 = 8ブロック
-const TOTAL_TRIALS = initialSearchTrials + trialsPerMemoryBlock * numMemoryBlocks; // 206
+const TOTAL_TRIALS = initialSearchTrials + trialsPerMemoryBlock * numMemoryBlocks; // 150
 
 let trialIdx = 0;                // 現在の試行 (0-based)
 let memoryBuffer = null;         // 現在保持中の数字列 (文字列)
@@ -173,7 +173,7 @@ function nextTrial() {
  * - 以降: memoryBlockSchedule から cond を取り出し
  *   ・phase = (trialIdx - 30) % trialsPerMemoryBlock
  *     - phase === 0 → 数字呈示 (digit_encode)
- *     - phase === 21 → リコール (digit_recall)  // 修正点
+ *     - phase === 14 → リコール (digit_recall)
  *     - else → 視覚探索 (search)
  */
 function runTrial() {
@@ -197,9 +197,9 @@ function runTrial() {
     showSearchTrial();
 
   } else {
-    // --- Phase 1+: Memory Blocks (8ブロック × 22試行) ---
+    // --- Phase 1+: Memory Blocks (8ブロック × 15試行) ---
     const localIdx = trialIdx - initialSearchTrials;
-    const phase = localIdx % trialsPerMemoryBlock;         // 0～21
+    const phase = localIdx % trialsPerMemoryBlock;         // 0～14
     const cond = memoryBlockSchedule[Math.floor(localIdx / trialsPerMemoryBlock)];
     // cond ={ digitLength, digitColorType, block }
 
@@ -233,7 +233,7 @@ function runTrial() {
         nextTrial();
       }, 5000);
 
-    // 2) phase === 21: リコール  (修正)
+    // 2) phase === 14: リコール
     } else if (phase === trialsPerMemoryBlock - 1) {
       drawAnnulusAndFixation('white');
       document.getElementById('recallDiv').style.display = 'block';
@@ -350,6 +350,7 @@ document.getElementById('startBtn').addEventListener('click', () => {
   document.getElementById('startDiv').style.display = 'none';
   runTrial();
 });
+
 document.getElementById('recallBtn').addEventListener('click', handleRecall);
 </script>
 </body>
