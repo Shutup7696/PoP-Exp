@@ -54,40 +54,40 @@ const centerX = canvas.width / 2;
 const centerY = canvas.height / 2;
 
 // ==================== 実験パラメータ ====================
-const TOTAL_TRIALS = 150;        // 総試行数
+const initialSearchTrials = 30;                  // 最初の30試行は探索のみ
+const trialsPerMemoryBlock = 20;                 // 各ブロックの試行数 (encode(1)+search(18)+recall(1))
+const numMemoryBlocks = 8;                       // 4条件 × 2回 = 8ブロック
+const TOTAL_TRIALS = initialSearchTrials + trialsPerMemoryBlock * numMemoryBlocks; // 190
+
 let trialIdx = 0;                // 現在の試行 (0-based)
 let memoryBuffer = null;         // 現在保持中の数字列 (文字列)
 let memoryColor = null;          // 現在保持中の数字列の色 (black / red / green)
-let memoryTrialCountdown = 0;    // 次のリコールまで探索試行を何回消費するか
 let currentTrial = null;         // 現在の試行オブジェクト
 let startTime = 0;               // RT 計測用タイムスタンプ
 const subj = 'subj_' + Date.now(); // 被験者 ID
 
-let fixedMemoryTrial = null;     // digit_encode→digit_recall 間で固定する試行オブジェクト
-let prevColor = null;            // 直前のターゲット色
-let prevCount = 0;               // 直前までの連続ターゲット色回数
+// Exploration phase でのターゲット色の連続回数
+let prevColor = null;
+let prevCount = 0;
 
 // ==================== メモリ試行の4ブロック条件 ====================
-// 各ブロックを 15 回ずつ、かつ 2 周 (合計 15*4*2 = 120試行)
-const memoryConditions = [];
-for (let repeat = 0; repeat < 2; repeat++) {
-  // ブロック1：2桁 × 黒 (block = 1)
-  for (let i = 0; i < 15; i++) {
-    memoryConditions.push({ digitLength: 2, digitColorType: 'black', block: 1 });
-  }
-  // ブロック2：5桁 × 黒 (block = 2)
-  for (let i = 0; i < 15; i++) {
-    memoryConditions.push({ digitLength: 5, digitColorType: 'black', block: 2 });
-  }
-  // ブロック3：2桁 × カラー (block = 3)
-  for (let i = 0; i < 15; i++) {
-    memoryConditions.push({ digitLength: 2, digitColorType: 'color', block: 3 });
-  }
-  // ブロック4：5桁 × カラー (block = 4)
-  for (let i = 0; i < 15; i++) {
-    memoryConditions.push({ digitLength: 5, digitColorType: 'color', block: 4 });
-  }
+// 各ブロックを 15 回ずつ格納し、それを 2 回繰り返す（合計 8 ブロック）
+const memoryBlocksTemplate = [
+  { digitLength: 2, digitColorType: 'black', block: 1 },   // ブロック1: 2桁・黒
+  { digitLength: 5, digitColorType: 'black', block: 2 },   // ブロック2: 5桁・黒
+  { digitLength: 2, digitColorType: 'color', block: 3 },   // ブロック3: 2桁・カラー
+  { digitLength: 5, digitColorType: 'color', block: 4 }    // ブロック4: 5桁・カラー
+];
+
+let memoryBlockSchedule = [];
+for (let rep = 0; rep < 2; rep++) {
+  memoryBlockSchedule.push(...memoryBlocksTemplate);
 }
+// ランダムにシャッフルして、各ブロックの実行順序を決定
+shuffleArray(memoryBlockSchedule);
+
+// ブロックスケジュール上のインデックス
+let blockIdx = -1;
 
 // ==================== 描画関数 ====================
 /** 円環と注視点 (fixation cross) を描画 */
@@ -121,7 +121,7 @@ function drawItem(x, y, size, color, notch) {
   ctx.lineTo(x - halfW, y);
   ctx.closePath();
   ctx.fill();
-  // ノッチ
+  // ノッチ部分を灰色で塗りつぶす
   ctx.fillStyle = '#ccc';
   const cutHeight = halfH * 0.5;
   if (notch === 'up') {
@@ -142,145 +142,153 @@ function generateDigits(length) {
   return Array.from({ length }, () => Math.floor(Math.random() * 10)).join('');
 }
 
-/** ターゲット色連続回数に応じた反復確率を返す: 100 - 20 * sqrt(n) */
+/** ターゲット色連続回数に応じた反復確率を返す: 100 - 20 * √n */
 function getRepeatProbability(n) {
   return Math.max(0, 100 - 20 * Math.sqrt(n));
 }
 
-// ==================== 試行生成 ====================
+/** 配列をシャッフルするユーティリティ */
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+// ==================== 試行実行・生成関連 ====================
+/** 次の試行を開始する */
+function nextTrial() {
+  trialIdx++;
+  if (trialIdx < TOTAL_TRIALS) {
+    runTrial();
+  } else {
+    document.getElementById('status').innerText = 'Experiment complete';
+  }
+}
+
 /**
- * trialIdx に応じて試行情報を生成
- * - trialIdx < 30 => 視覚探索のみ (searchOnly)
- * - 全体の先頭 30 試行以外 => memoryConditions 配列から取り出し 
+ * runTrial：trialIdx に応じて以下を分岐
+ * - trialIdx < initialSearchTrials (30): 視覚探索のみ (searchOnly)
+ * - 以降: memoryBlockSchedule から cond を取り出し
+ *   ・phase = (trialIdx - 30) % trialsPerMemoryBlock
+ *     - phase === 0 → 数字呈示 (digit_encode)
+ *     - phase === 19 → リコール (digit_recall)
+ *     - else → 視覚探索 (search)
  */
-function generateTrial() {
-  if (trialIdx < 30) {
-    // Controlled Phase: 30 回の純粋な視覚探索
+function runTrial() {
+  // --- Phase 0: 最初の 30 試行 (ブロック0: 純粋視覚探索) ---
+  if (trialIdx < initialSearchTrials) {
     const repeatProb = getRepeatProbability(prevCount);
     const repeat = (Math.random() * 100 < repeatProb);
-    const tCol = (repeat && prevColor) ? prevColor : (prevColor === 'red' ? 'green' : 'red');
+    const tCol = (repeat && prevColor) ? prevColor : (Math.random() < 0.5 ? 'red' : 'green');
     const dCol = (tCol === 'red') ? 'green' : 'red';
     if (tCol === prevColor) prevCount++;
     else prevCount = 1;
     prevColor = tCol;
-    return {
-      trial_number: trialIdx + 1,
-      tCol, 
-      dCol,
-      isMemory: false,
-      task: 'searchOnly',
-      block: 0
-    };
-  } else {
-    // Memory Phase: 120 試行
-    const idx = trialIdx - 30;
-    const cond = memoryConditions[idx];
-    const isMemory = (memoryBuffer === null && memoryTrialCountdown === 0);
-    const tCol = (Math.random() < 0.5) ? 'red' : 'green';
-    const dCol = (tCol === 'red') ? 'green' : 'red';
-    // ブロック条件から digitColor を設定 (黒 or ターゲット色)
-    const digitColor = (cond.digitColorType === 'color') ? tCol : 'black';
-    return {
+
+    currentTrial = {
       trial_number: trialIdx + 1,
       tCol,
       dCol,
-      isMemory,
-      digitLength: cond.digitLength,
-      digitColor,
-      block: cond.block
+      task: 'searchOnly',
+      block: 0
     };
+    showSearchTrial();
+
+  } else {
+    // --- Phase 1+: Memory Blocks (8ブロック × 20試行) ---
+    const localIdx = trialIdx - initialSearchTrials;
+    const phase = localIdx % trialsPerMemoryBlock;         // 0～19
+    const cond = memoryBlockSchedule[Math.floor(localIdx / trialsPerMemoryBlock)];
+    // cond ={ digitLength, digitColorType, block }
+
+    // 1) phase === 0: 数字呈示
+    if (phase === 0) {
+      memoryBuffer = generateDigits(cond.digitLength);
+      // 黒 or カラー
+      const tCol = (Math.random() < 0.5) ? 'red' : 'green';
+      memoryColor = (cond.digitColorType === 'color') ? tCol : 'black';
+
+      // 数字列表示
+      const digitDiv = document.getElementById('digitDiv');
+      const digitDisplay = document.getElementById('digitDisplay');
+      digitDisplay.innerText = memoryBuffer;
+      digitDisplay.style.color = memoryColor;
+      digitDiv.style.display = 'block';
+      drawAnnulusAndFixation('white');
+
+      // digit_encode を送信
+      saveTrial({
+        trial_number: trialIdx + 1,
+        task: 'digit_encode',
+        digits: memoryBuffer,
+        digit_color: memoryColor,
+        block: cond.block
+      });
+
+      // 3 秒後に数字を隠して次試行へ
+      setTimeout(() => {
+        digitDiv.style.display = 'none';
+        nextTrial();
+      }, 3000);
+
+    // 2) phase === 19: リコール
+    } else if (phase === trialsPerMemoryBlock - 1) {
+      drawAnnulusAndFixation('white');
+      document.getElementById('recallDiv').style.display = 'block';
+      startTime = Date.now();
+
+      currentTrial = {
+        trial_number: trialIdx + 1,
+        task: 'digit_recall',
+        correct_digits: memoryBuffer,
+        correct_color: memoryColor,
+        block: cond.block
+      };
+
+    // 3) それ以外: 視覚探索 (search)
+    } else {
+      const tCol = (Math.random() < 0.5) ? 'red' : 'green';
+      const dCol = (tCol === 'red') ? 'green' : 'red';
+
+      currentTrial = {
+        trial_number: trialIdx + 1,
+        tCol,
+        dCol,
+        task: 'search',
+        block: cond.block
+      };
+      showSearchTrial();
+    }
   }
 }
 
-// ==================== 試行実行 ====================
-function runTrial() {
-  let tr;
-  // リコール直後に次の記憶試行が続くときの処理
-  if (memoryBuffer !== null && memoryTrialCountdown === 0) {
-    tr = { ...fixedMemoryTrial };
-  } else {
-    tr = generateTrial();
-    if (tr.isMemory) {
-      fixedMemoryTrial = tr;
-    }
-  }
-  currentTrial = tr;
+/** 視覚探索試行を表示する */
+function showSearchTrial() {
+  drawAnnulusAndFixation('black');
+  setTimeout(() => {
+    const positions = getSymmetricPositions();
+    const targetIndex = Math.floor(Math.random() * 3);
+    const colors = [currentTrial.dCol, currentTrial.dCol, currentTrial.dCol];
+    colors[targetIndex] = currentTrial.tCol;
+    const notches = ['down', 'down', 'down'];
+    notches[targetIndex] = (Math.random() < 0.5) ? 'up' : 'down';
+    const correct = notches[targetIndex];
 
-  // --- Memory Encode フェーズ ---
-  if (tr.isMemory) {
-    memoryBuffer = generateDigits(tr.digitLength);
-    memoryColor = tr.digitColor;
-    memoryTrialCountdown = 3;
-
-    // 数字列を表示
-    const digitDiv = document.getElementById('digitDiv');
-    const digitDisplay = document.getElementById('digitDisplay');
-    digitDisplay.innerText = memoryBuffer;
-    digitDisplay.style.color = memoryColor;
-    digitDiv.style.display = 'block';
-    drawAnnulusAndFixation('white');
-
-    // データ送信 (digit_encode)
-    saveTrial({
-      ...tr,
-      task: 'digit_encode',
-      digits: memoryBuffer,
-      digit_color: memoryColor,
-      block: tr.block
+    positions.forEach((pos, i) => {
+      drawItem(pos[0], pos[1], 80, colors[i], notches[i]);
     });
 
-    // 5秒後に数字列非表示 → nextTrial
-    setTimeout(() => {
-      digitDiv.style.display = 'none';
-      nextTrial();
-    }, 5000);
-
-  // --- Memory Recall フェーズ ---
-  } else if (memoryBuffer !== null && memoryTrialCountdown === 0) {
-    drawAnnulusAndFixation('white');
-    document.getElementById('recallDiv').style.display = 'block';
+    document.getElementById('respDiv').style.display = 'block';
     startTime = Date.now();
-
     currentTrial = {
-      ...tr,
-      task: 'digit_recall',
-      correct_digits: memoryBuffer,
-      correct_color: memoryColor,
-      block: tr.block
+      ...currentTrial,
+      colors,
+      notches,
+      correct
     };
-
-  // --- Search Only / Search フェーズ ---
-  } else {
-    if (memoryTrialCountdown > 0) memoryTrialCountdown--;
-    drawAnnulusAndFixation('black');
-
-    // 1000ms 後に刺激提示
-    setTimeout(() => {
-      const positions = getSymmetricPositions();
-      const targetIndex = Math.floor(Math.random() * 3);
-      const colors = [tr.dCol, tr.dCol, tr.dCol];
-      colors[targetIndex] = tr.tCol;
-
-      const notches = ['down', 'down', 'down'];
-      notches[targetIndex] = (Math.random() < 0.5) ? 'up' : 'down';
-      const correct = notches[targetIndex];
-
-      positions.forEach((pos, i) => {
-        drawItem(pos[0], pos[1], 80, colors[i], notches[i]);
-      });
-
-      document.getElementById('respDiv').style.display = 'block';
-      startTime = Date.now();
-      currentTrial = {
-        ...tr,
-        task: (tr.task === 'searchOnly') ? 'searchOnly' : 'search',
-        colors,
-        notches,
-        correct,
-        block: tr.block
-      };
-    }, 1000);
-  }
+  }, 1000);
 }
 
 // ==================== 応答処理 ====================
@@ -294,8 +302,7 @@ function handleSearchResp(ans) {
     ...currentTrial,
     response: ans,
     rt_ms: rt,
-    is_correct: correct,
-    block: currentTrial.block
+    is_correct: correct
   });
   nextTrial();
 }
@@ -313,34 +320,22 @@ function handleRecall() {
     response_digits: ans,
     response_color: color,
     rt_ms: rt,
-    is_correct: correct,
-    block: currentTrial.block,
-    correct_digits: currentTrial.correct_digits
+    is_correct: correct
   });
 
   memoryBuffer = null;
   memoryColor = null;
-  fixedMemoryTrial = null;
   document.getElementById('recallInput').value = '';
   document.getElementById('colorSelect').value = '';
   nextTrial();
 }
 
-// ==================== データ送信・試行制御 ====================
+// ==================== データ送信 ====================
 function saveTrial(data) {
   fetch(WEB_APP_URL, {
     method: 'POST',
     body: JSON.stringify({ subject_id: subj, ...data })
   }).catch(console.error);
-}
-
-function nextTrial() {
-  trialIdx++;
-  if (trialIdx < TOTAL_TRIALS) {
-    runTrial();
-  } else {
-    document.getElementById('status').innerText = 'Experiment complete';
-  }
 }
 
 // ==================== イベントリスナ ====================
