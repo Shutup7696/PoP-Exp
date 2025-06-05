@@ -2,12 +2,12 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>PoP Priming with Digit WM</title>
+  <title>PoP Priming Experiment (Digit WM)</title>
   <style>
     body { text-align:center; font-family:sans-serif; margin-top:30px; }
     canvas { background:#ccc; display:block; margin:10px auto; }
     button, input, select { padding:10px 20px; font-size:18px; margin:10px; }
-    #digitDisplay { font-size:32px; font-weight:bold; margin:20px; }
+    #digitDisplay { font-size:32px; font-weight:bold; margin:20px; color: white; }
   </style>
 </head>
 <body>
@@ -17,76 +17,53 @@
   <div id="startDiv">
     <button id="startBtn">Start Experiment</button>
   </div>
-  <!-- 数字列表示用 -->
+
   <div id="digitDiv" style="display:none;">
     <div id="digitDisplay"></div>
   </div>
-  <!-- 数字列リコール用 -->
+
+  <div id="respDiv" style="display:none;">
+    <p>Press F for Notch Up, J for Notch Down</p>
+  </div>
+
   <div id="recallDiv" style="display:none;">
     <input type="text" id="recallInput" maxlength="5" placeholder="Enter digits" />
     <select id="colorSelect">
-      <option value="">Select color</option>
+      <option value="">Select Color</option>
       <option value="white">White</option>
       <option value="red">Red</option>
       <option value="green">Green</option>
     </select>
     <button id="recallBtn">Submit</button>
   </div>
+
   <p id="status"></p>
 
 <script>
-// ==================== 定数・変数 ====================
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxG_UikVlyzJxj_kFZV53337XGkwpcX62qf1-f5Qfi5gNv7paXurH6oJ6a43j4kqav1hA/exec';
 
-// 実験全体の試行数（40試行）
-const TOTAL_TRIALS = 40;
-// 4ブロックに分ける：
-// 0〜9: ブロック1(2桁白)   → trialIdx 0〜9 (10試行)
-// 10〜19: ブロック2(5桁白) → trialIdx 10〜19 (10試行)
-// 20〜29: ブロック3(2桁カラー) → trialIdx 20〜29 (10試行)
-// 30〜39: ブロック4(5桁カラー) → trialIdx 30〜39 (10試行)
-const BLOCK_SIZE = TOTAL_TRIALS / 4;  
-
-// 数字列表示直後、記憶後の遅延（探索へ進む前に数字列表示後1000ms）
-const DIGIT_DISPLAY_TIME = 1000;
-// 数字記憶→リコール間の遅延試行数
-const DELAY_RECALL_TRIALS = 3;
-
-// 被験者IDをタイムスタンプで自動生成
-let subj = 'subj_' + Date.now();
-// 現在の試行インデックス（0始まり）
-let trialIdx = 0;
-// リアクションタイム計測用
-let startTime = 0;
-// メモリーバッファ：現在保持中の数字列
-let memoryBuffer = null;
-// メモリーバッファの色（white/red/green）
-let memoryColor = null;
-// メモリーバッファを次にリコールするまでのカウントダウン（試行数）
-let memoryTrialCountdown = 0;
-// 現在の試行情報
-let currentTrial = null;
-
-// canvas, ctx の取得
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const centerX = canvas.width / 2;
 const centerY = canvas.height / 2;
 
-// ==================== 描画関数 ====================
-/**
- * 円環と注視点を描画する。
- * @param {string} color - 円環の色 ('white' or 'black' など)
- */
+const TOTAL_TRIALS = 40;
+let trialIdx = 0;
+let memoryBuffer = null;
+let memoryColor = null;
+let memoryTrialCountdown = 0;
+let currentTrial = null;
+let startTime = 0;
+let subj = 'subj_' + Date.now();
+
 function drawAnnulusAndFixation(color) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // 円環
   ctx.lineWidth = 20;
   ctx.strokeStyle = color;
   ctx.beginPath();
   ctx.arc(centerX, centerY, 200, 0, 2 * Math.PI);
   ctx.stroke();
-  // 注視点（十字）
+
   ctx.strokeStyle = 'white';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -97,18 +74,9 @@ function drawAnnulusAndFixation(color) {
   ctx.stroke();
 }
 
-/**
- * ひし形刺激を描画する
- * @param {number} x - 中心X座標
- * @param {number} y - 中心Y座標
- * @param {number} size - ひし形の縦の高さ
- * @param {string} color - 塗りつぶし色
- * @param {'up'|'down'} notch - ノッチ向き
- */
 function drawItem(x, y, size, color, notch) {
   const halfH = size / 2;
   const halfW = size * 0.4;
-  // ひし形本体
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.moveTo(x, y - halfH);
@@ -118,7 +86,6 @@ function drawItem(x, y, size, color, notch) {
   ctx.closePath();
   ctx.fill();
 
-  // ノッチ部分を灰色で塗りつぶし
   ctx.fillStyle = '#ccc';
   const cutHeight = halfH * 0.5;
   if (notch === 'up') {
@@ -128,235 +95,123 @@ function drawItem(x, y, size, color, notch) {
   }
 }
 
-/**
- * ひし形を表示する中心座標を三等分で取得
- * @param {number} radius - 円周上の半径
- * @returns {Array<Array<number>>} - [[x1,y1], [x2,y2], [x3,y3]]
- */
 function getSymmetricPositions(radius = 100) {
   const angles = [0, 120, 240].map(deg => deg * Math.PI / 180);
   return angles.map(a => [centerX + radius * Math.cos(a), centerY + radius * Math.sin(a)]);
 }
 
-// ==================== 試行生成・実行 ====================
-/**
- * trialIdx に応じて：  
- * - ブロック番号 (0〜3) を決定  
- * - ターゲット色 tCol とディストラクタ色 dCol をランダムに決定（赤/緑）  
- * - 当該ブロックの「数字列長」と「数字色」を決定  
- * - 記憶試行か否かを決定  
- * @returns {Object} - 試行内容オブジェクト
- */
+function generateDigits(length) {
+  return Array.from({length}, () => Math.floor(Math.random() * 10)).join('');
+}
+
 function generateTrial() {
-  // 0〜3 のブロック番号
-  const block = Math.floor(trialIdx / BLOCK_SIZE);
-  // ターゲット色・ディストラクタ色をランダムに決定
-  const [tCol, dCol] = Math.random() < 0.5 ? ['red', 'green'] : ['green', 'red'];
-  // ブロックごとの数字条件
-  let digitLength, digitColor;
-  if (block === 0) {
-    // ブロック1: 2桁・白
-    digitLength = 2;
-    digitColor = 'white';
-  } else if (block === 1) {
-    // ブロック2: 5桁・白
-    digitLength = 5;
-    digitColor = 'white';
-  } else if (block === 2) {
-    // ブロック3: 2桁・カラー (tCol or dCol)
-    digitLength = 2;
-    digitColor = Math.random() < 0.5 ? tCol : dCol;
-  } else {
-    // ブロック4: 5桁・カラー (tCol or dCol)
-    digitLength = 5;
-    digitColor = Math.random() < 0.5 ? tCol : dCol;
-  }
-  // 記憶試行判定：memoryBuffer が空かつランダム <0.25 かつカウントダウン ==0
-  const isMemory = (memoryBuffer === null && Math.random() < 0.25 && memoryTrialCountdown === 0);
+  const isMemory = memoryBuffer === null && Math.random() < 0.25 && memoryTrialCountdown === 0;
+  const tCol = Math.random() < 0.5 ? 'red' : 'green';
+  const dCol = (tCol === 'red') ? 'green' : 'red';
+  const digitLength = Math.random() < 0.5 ? 2 : 5;
+  const digitColor = Math.random() < 0.5 ? 'white' : tCol; // ターゲット色 or 白
 
   return {
     trial_number: trialIdx + 1,
-    block,        // 0〜3
-    tCol,         // ターゲット色 ('red'/'green')
-    dCol,         // ディストラクタ色 ('red'/'green')
-    digitLength,  // 表示する数字列の長さ (2 or 5)
-    digitColor,   // 数字列の色 ('white' or tCol/dCol)
-    isMemory      // 記憶試行か否か
+    tCol, dCol, isMemory,
+    digitLength, digitColor
   };
 }
 
-/**
- * １試行を実行する。
- *  - isMemory: 数字列エンコード → 1000ms 表示 → 保存 → 次トライ
- *  - isRecall: memoryBuffer != null && カウントダウン == 0 → リコールフェーズへ
- *  - それ以外: 視覚探索刺激を表示
- */
 function runTrial() {
   const tr = generateTrial();
-  // 共通：まず円環＋注視点を白で表示 → 1000ms 後に次フェーズへ
-  drawAnnulusAndFixation('white');
-  setTimeout(() => {
-    // 記憶試行フェーズ
-    if (tr.isMemory) {
-      // ランダム数字列生成
-      const digits = Array.from({ length: tr.digitLength }, () => Math.floor(Math.random() * 10)).join('');
-      memoryBuffer = digits;
-      memoryColor = tr.digitColor;
-      memoryTrialCountdown = DELAY_RECALL_TRIALS;
+  currentTrial = tr;
 
-      // 数字列表示
-      document.getElementById('digitDisplay').innerText = digits;
-      document.getElementById('digitDisplay').style.color = memoryColor;
-      document.getElementById('digitDiv').style.display = 'block';
+  if (tr.isMemory) {
+    memoryBuffer = generateDigits(tr.digitLength);
+    memoryColor = tr.digitColor;
+    memoryTrialCountdown = 3;
 
-      // 保存データに含めるため currentTrial に入れておく
-      currentTrial = {
-        ...tr,
-        task: 'digit_encode',
-        digits: digits,
-        digitColor: memoryColor
-      };
-      saveTrial(currentTrial);
+    document.getElementById('digitDisplay').style.color = tr.digitColor;
+    document.getElementById('digitDisplay').innerText = memoryBuffer;
+    document.getElementById('digitDiv').style.display = 'block';
+    drawAnnulusAndFixation('white');
 
-      // 1000ms 経過後、数字列を隠して次試行
-      setTimeout(() => {
-        document.getElementById('digitDiv').style.display = 'none';
-        nextTrial();
-      }, DIGIT_DISPLAY_TIME);
+    setTimeout(() => {
+      document.getElementById('digitDiv').style.display = 'none';
+      saveTrial({...tr, task: 'digit_encode', digits: memoryBuffer, digit_color: memoryColor});
+      nextTrial();
+    }, 5000);
 
-    }
-    // リコールフェーズ
-    else if (memoryBuffer !== null && memoryTrialCountdown === 0) {
-      currentTrial = {
-        ...tr,
-        task: 'digit_recall',
-        correct_digits: memoryBuffer,
-        correct_color: memoryColor
-      };
-      // リコール画面を表示
-      document.getElementById('recallInput').value = '';
-      document.getElementById('colorSelect').value = '';
-      document.getElementById('recallDiv').style.display = 'block';
-      // リアクションタイム計測開始
-      startTime = Date.now();
-    }
-    // 視覚探索フェーズ
-    else {
-      if (memoryTrialCountdown > 0) memoryTrialCountdown--;
+  } else if (memoryBuffer !== null && memoryTrialCountdown === 0) {
+    drawAnnulusAndFixation('white');
+    document.getElementById('recallDiv').style.display = 'block';
+    startTime = Date.now();
+    currentTrial = {...tr, task: 'digit_recall', correct_digits: memoryBuffer, correct_color: memoryColor};
 
-      // ターゲット／ディストラクタ色は generateTrial() から取得
-      const tCol = tr.tCol;
-      const dCol = tr.dCol;
-      const positions = getSymmetricPositions(100);
+  } else {
+    if (memoryTrialCountdown > 0) memoryTrialCountdown--;
+    setTimeout(() => {
+      drawAnnulusAndFixation('black');
+      const positions = getSymmetricPositions();
       const targetIndex = Math.floor(Math.random() * 3);
+      const colors = [tr.dCol, tr.dCol, tr.dCol];
+      colors[targetIndex] = tr.tCol;
 
-      // アイテム色配列を作成
-      const itemColors = [dCol, dCol, dCol];
-      itemColors[targetIndex] = tCol;
-
-      // ノッチ向きを生成 (50% up/down)
       const notches = ['down', 'down', 'down'];
       notches[targetIndex] = Math.random() < 0.5 ? 'up' : 'down';
       const correct = notches[targetIndex];
 
-      // currentTrial に必要情報を格納しておく
-      currentTrial = {
-        ...tr,
-        task: 'search',
-        colors: itemColors,
-        notch: notches,
-        correct: correct
-      };
-
-      // 対象位置にひし形を描画
-      positions.forEach((pos, i) => {
-        drawItem(pos[0], pos[1], 80, itemColors[i], notches[i]);
-      });
-
-      // リアクションタイム計測開始
+      positions.forEach((pos, i) => drawItem(pos[0], pos[1], 80, colors[i], notches[i]));
+      document.getElementById('respDiv').style.display = 'block';
       startTime = Date.now();
-    }
-  }, DIGIT_DISPLAY_TIME);
-}
-
-// ==================== 応答処理 ====================
-/**
- * 視覚探索に対するキー応答 (F/J)
- * @param {'up'|'down'} ans - ノッチ応答 
- */
-function handleSearchResp(ans) {
-  // RT計測
-  const rt = Date.now() - startTime;
-  const correct = (ans === currentTrial.correct);
-  saveTrial({
-    ...currentTrial,
-    response: ans,
-    rt_ms: rt,
-    is_correct: correct
-  });
-  nextTrial();
-}
-
-/**
- * 数字リコールに対するサブミット
- */
-function handleRecall() {
-  const ansDigits = document.getElementById('recallInput').value;
-  const ansColor = document.getElementById('colorSelect').value;
-  document.getElementById('recallDiv').style.display = 'none';
-  const rt = Date.now() - startTime;
-  const correct = (ansDigits === currentTrial.correct_digits && ansColor === currentTrial.correct_color);
-  saveTrial({
-    ...currentTrial,
-    response_digits: ansDigits,
-    response_color: ansColor,
-    rt_ms: rt,
-    is_correct: correct
-  });
-  memoryBuffer = null;
-  memoryColor = null;
-  nextTrial();
-}
-
-// ==================== データ送信・試行進行 ====================
-/**
- * Google Apps Script にデータを送信
- * @param {Object} data - JSON 化して送るオブジェクト
- */
-function saveTrial(data) {
-  fetch(WEB_APP_URL, {
-    method: 'POST',
-    body: JSON.stringify({ subject_id: subj, ...data })
-  }).catch(console.error);
-}
-
-/**
- * 次の試行へ移行
- */
-function nextTrial() {
-  trialIdx++;
-  if (trialIdx < TOTAL_TRIALS) {
-    runTrial();
-  } else {
-    document.getElementById('status').innerText = 'Experiment complete';
+      currentTrial = {...tr, task: 'search', colors, notches, correct};
+    }, 1000);
   }
 }
 
-// ==================== イベントリスナ ====================
+function handleSearchResp(ans) {
+  document.getElementById('respDiv').style.display = 'none';
+  const rt = Date.now() - startTime;
+  const correct = (ans === currentTrial.correct);
+  saveTrial({...currentTrial, response: ans, rt_ms: rt, is_correct: correct});
+  nextTrial();
+}
+
+function handleRecall() {
+  const ans = document.getElementById('recallInput').value.trim();
+  const color = document.getElementById('colorSelect').value;
+  document.getElementById('recallDiv').style.display = 'none';
+  const rt = Date.now() - startTime;
+  const correct = (ans === currentTrial.correct_digits && color === currentTrial.correct_color);
+  saveTrial({...currentTrial, response_digits: ans, response_color: color, rt_ms: rt, is_correct: correct});
+  memoryBuffer = null;
+  memoryColor = null;
+  document.getElementById('recallInput').value = '';
+  document.getElementById('colorSelect').value = '';
+  nextTrial();
+}
+
+function saveTrial(data) {
+  fetch(WEB_APP_URL, {
+    method: 'POST',
+    body: JSON.stringify({subject_id: subj, ...data})
+  }).catch(console.error);
+}
+
+function nextTrial() {
+  trialIdx++;
+  if (trialIdx < TOTAL_TRIALS) runTrial();
+  else document.getElementById('status').innerText = 'Experiment complete';
+}
+
+// キー入力で応答
+document.addEventListener('keydown', e => {
+  if (document.getElementById('respDiv').style.display !== 'none') {
+    if (e.key === 'f') handleSearchResp('up');
+    else if (e.key === 'j') handleSearchResp('down');
+  }
+});
+
 document.getElementById('startBtn').addEventListener('click', () => {
   document.getElementById('startDiv').style.display = 'none';
   runTrial();
 });
-
-// キー応答（視覚探索）：Fキー→up、Jキー→down
-document.addEventListener('keydown', e => {
-  if (currentTrial?.task === 'search') {
-    if (e.key.toLowerCase() === 'f') handleSearchResp('up');
-    else if (e.key.toLowerCase() === 'j') handleSearchResp('down');
-  }
-});
-
-// 数字リコールのSubmit
 document.getElementById('recallBtn').addEventListener('click', handleRecall);
 </script>
 </body>
