@@ -272,8 +272,8 @@ function showSearchTrial() {
     const targetIndex = Math.floor(Math.random() * 3);
     const colors = [currentTrial.dCol, currentTrial.dCol, currentTrial.dCol];
     colors[targetIndex] = currentTrial.tCol;
-    const notches = ['down', 'down', 'down'];
-    notches[targetIndex] = (Math.random() < 0.5) ? 'up' : 'down';
+
+    const notches = Array.from({length: 3}, () => (Math.random() < 0.5 ? 'up' : 'down'));
     const correct = notches[targetIndex];
 
     positions.forEach((pos, i) => {
@@ -290,6 +290,7 @@ function showSearchTrial() {
     };
   }, 1000);
 }
+
 
 // ==================== 応答処理 ====================
 /** Search / SearchOnly のキー応答 (F=up, J=down) */
