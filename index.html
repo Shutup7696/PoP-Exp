@@ -270,10 +270,20 @@ function showSearchTrial() {
   setTimeout(() => {
     const positions = getSymmetricPositions();
     const targetIndex = Math.floor(Math.random() * 3);
-    const colors = [currentTrial.dCol, currentTrial.dCol, currentTrial.dCol];
-    colors[targetIndex] = currentTrial.tCol;
 
-    const notches = Array.from({length: 3}, () => (Math.random() < 0.5 ? 'up' : 'down'));
+    const colors = [];
+    const notches = [];
+
+    for (let i = 0; i < 3; i++) {
+      if (i === targetIndex) {
+        colors.push(currentTrial.tCol);
+        notches.push(Math.random() < 0.5 ? 'up' : 'down');
+      } else {
+        colors.push(currentTrial.dCol);
+        notches.push(Math.random() < 0.5 ? 'up' : 'down');
+      }
+    }
+
     const correct = notches[targetIndex];
 
     positions.forEach((pos, i) => {
